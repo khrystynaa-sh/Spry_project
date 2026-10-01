@@ -1,6 +1,8 @@
 import type { Meeting, MeetingCreate } from "@/types/meeting";
 
-const BASE = "/api/meetings";
+// Empty in development (the Vite dev server proxies /api); the backend origin in production builds.
+const API_ORIGIN = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+const BASE = `${API_ORIGIN}/api/meetings`;
 
 interface ValidationDetail {
   loc: (string | number)[];
