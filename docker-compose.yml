@@ -1,73 +1,62 @@
 services:
-  db:
-    image: postgres:17-alpine
+  postgres:
+    image: postgres:16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
-      POSTGRES_DB: ${POSTGRES_DB:-meetings}
+      POSTGRES_DB: spry
+      POSTGRES_USER: spry
+      POSTGRES_PASSWORD: spry
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-meetings}"]
+      test: ["CMD-SHELL", "pg_isready -U spry -d spry"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 10
+      start_period: 10s
 
   backend:
-    build:
-      context: ./backend
-      args:
-        INSTALL_DEV: "true"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-meetings}
-      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Kyiv}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      RUN_MIGRATIONS_ON_START: ${RUN_MIGRATIONS_ON_START:-true}
-      # File events from a Windows (or some VM) bind mount never reach the
-      # container, so --reload polls instead — the backend twin of WATCHPACK_POLLING.
-      WATCHFILES_FORCE_POLLING: "true"
-      # From `make aws-auth-env`; the API refuses meetings requests without them.
-      COGNITO_REGION: ${AWS_REGION:-us-east-1}
-      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
-      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    build: ./backend
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://spry:spry@postgres:5432/spry
+      WATCHFILES_FORCE_POLLING: "true"
     volumes:
       - ./backend:/app
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/meetings', timeout=2)"
+      interval: 5s
+      timeout: 3s
       retries: 10
-      start_period: 20s
+      start_period: 15s
 
   frontend:
-    build:
-      context: ./frontend
-      target: dev
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
-      NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
-      NEXT_PUBLIC_COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
-      NEXT_PUBLIC_COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
-      NEXT_PUBLIC_COGNITO_GOOGLE_ENABLED: ${COGNITO_GOOGLE_ENABLED:-false}
-      WATCHPACK_POLLING: "true"
+    build: ./frontend
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "5173:5173"
+    environment:
+      API_PROXY_TARGET: http://backend:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/.next
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5173/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
 volumes:
   pgdata:
